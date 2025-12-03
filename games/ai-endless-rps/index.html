@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI Endless RPS — budglet</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#06b6d4;--text:#e6eef6;--muted:#9fb6c3}
+    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:linear-gradient(180deg,#071023 0%, #071422 100%);color:var(--text)}
+    .wrap{max-width:980px;margin:20px auto;padding:18px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    h1{margin:0;font-size:1.2rem;color:var(--accent)}
+    p.lead{margin:6px 0 18px;color:var(--muted)}
+    .card{background:var(--card);border-radius:10px;padding:14px;box-shadow:0 6px 20px rgba(2,6,23,.6)}
+    .board{display:grid;grid-template-columns:1fr 360px;gap:14px}
+    @media(max-width:920px){.board{grid-template-columns:1fr}}
+
+    .play-area{display:flex;flex-direction:column;gap:12px}
+    .prev-move{font-size:1.05rem;color:var(--muted)}
+    .input-row{display:flex;gap:8px;align-items:center}
+    .text-input{flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,.04);background:transparent;color:var(--text);outline:none}
+    .btn{background:transparent;border:1px solid rgba(255,255,255,.06);color:var(--text);padding:10px 12px;border-radius:8px;cursor:pointer}
+    .btn.primary{background:var(--accent);color:#032428;border:none}
+    .emoji-row{display:flex;gap:8px;flex-wrap:wrap}
+    .emoji-btn{font-size:1.4rem;padding:8px;border-radius:8px;background:rgba(255,255,255,.02);border:none;color:var(--text);cursor:pointer}
+
+    .panel{display:flex;flex-direction:column;gap:10px}
+    .log{height:320px;overflow:auto;padding:8px;border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,.01),transparent);border:1px solid rgba(255,255,255,.02)}
+    .entry{padding:8px;border-radius:6px;margin-bottom:8px;background:rgba(255,255,255,.01)}
+    .win{border-left:4px solid #4ade80}
+    .lose{border-left:4px solid #fb7185}
+    .tie{border-left:4px solid #f59e0b}
+    .meta{font-size:0.85rem;color:var(--muted)}
+
+    .score{display:flex;gap:8px;align-items:center}
+    .score .pill{background:rgba(255,255,255,.03);padding:8px 10px;border-radius:999px;font-weight:700}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    footer{margin-top:14px;color:var(--muted);font-size:0.9rem}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>AI Endless RPS</h1>
+        <p class="lead">Endless creative RPS judged by a local pseudo‑AI. Type or pick an emoji/word and try to "beat" the previous item.</p>
+      </div>
+      <div class="score">
+        <div class="pill score-wins pill" title="Wins">Wins: <span id="wins">0</span></div>
+        <div class="pill score-losses pill" title="Losses">Losses: <span id="losses">0</span></div>
+        <div class="pill score-ties pill" title="Ties">Ties: <span id="ties">0</span></div>
+      </div>
+    </header>
+
+    <div class="card" style="margin-top:12px">
+      <div class="board">
+        <div class="play-area">
+          <div class="prev-move">Previous: <strong id="prevMove">(start)</strong></div>
+
+          <div class="input-row">
+            <input id="moveInput" class="text-input" placeholder="Type a move (emoji or short text) — e.g. 🔥 dragon, paper, ✊" />
+            <button id="playBtn" class="btn primary">Play</button>
+            <button id="passBtn" class="btn" title="Suggest a creative reply">Suggest</button>
+          </div>
+
+          <div class="emoji-row" id="emojiRow">
+            <button class="emoji-btn">✊</button>
+            <button class="emoji-btn">✋</button>
+            <button class="emoji-btn">✌️</button>
+            <button class="emoji-btn">🦎</button>
+            <button class="emoji-btn">🖖</button>
+            <button class="emoji-btn">🔥</button>
+            <button class="emoji-btn">💧</button>
+            <button class="emoji-btn">⚡</button>
+            <button class="emoji-btn">🪨</button>
+          </div>
+
+          <div class="controls">
+            <button id="resetBtn" class="btn">Reset</button>
+            <button id="exportBtn" class="btn">Export Log</button>
+            <label style="margin-left:6px;color:var(--muted)"><input id="soundsToggle" type="checkbox" /> Sounds</label>
+          </div>
+
+        </div>
+
+        <div class="panel">
+          <div class="card" style="padding:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <strong>Round Log</strong>
+              <small class="meta">Confidence shown per decision</small>
+            </div>
+            <div id="log" class="log" aria-live="polite"></div>
+          </div>
+
+          <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:6px">
+            <div class="meta">AI Judge: local pseudo‑AI — creative heuristics, no network calls.</div>
+            <div class="meta">Tip: be creative! The judge uses keyword matches, categories, and a touch of randomness.</div>
+          </div>
+        </div>
+      </div>
+
+      <footer>Made for budglet • Your moves are stored in your browser only.</footer>
+    </div>
+  </div>
+
+  <script>
+    // Pseudo-AI judge for endless creative RPS (client-side)
+    (function(){
+      const prevEl = document.getElementById('prevMove');
+      const input = document.getElementById('moveInput');
+      const playBtn = document.getElementById('playBtn');
+      const passBtn = document.getElementById('passBtn');
+      const logEl = document.getElementById('log');
+      const winsEl = document.getElementById('wins');
+      const lossesEl = document.getElementById('losses');
+      const tiesEl = document.getElementById('ties');
+      const resetBtn = document.getElementById('resetBtn');
+      const exportBtn = document.getElementById('exportBtn');
+      const soundsToggle = document.getElementById('soundsToggle');
+      const emojiRow = document.getElementById('emojiRow');
+
+      let state = { prev:null, wins:0, losses:0, ties:0, history:[] };
+
+      // categories used by heuristic judge
+      const CATS = {
+        rock: {keywords:['rock','stone','boulder','🪨','rocky','crag','mountain','pebble','✊'], name:'Rock'},
+        paper: {keywords:['paper','sheet','page','document','✋','scroll','note'], name:'Paper'},
+        scissors: {keywords:['scissors','shears','scissor','✌','✌️','cut','blade'], name:'Scissors'},
+        lizard: {keywords:['lizard','reptile','🦎','gecko','salamander','dragon'], name:'Lizard'},
+        spock: {keywords:['spock','vulcan','🖖','spock','logic','science'], name:'Spock'},
+        fire: {keywords:['fire','🔥','flame','burn','inferno','ember'], name:'Fire'},
+        water: {keywords:['water','💧','sea','ocean','river','wave','spray'], name:'Water'},
+        electric: {keywords:['electric','⚡','lightning','thunder','zap','spark'], name:'Electric'},
+        magic: {keywords:['magic','✨','spell','wizard','mage','sorcerer','enchanted'], name:'Magic'},
+        monster: {keywords:['dragon','🐉','monster','beast','troll','orc'], name:'Monster'}
+      };
+
+      const templates = {
+        win:['Nice! {A} beats {B} — {R}','{A} overwhelms {B}. {R}','{A} conquers {B}: {R}'],
+        lose:['Oops — {A} fails vs {B}. {R}','{A} is outmatched by {B}: {R}','{A} doesn\'t stand a chance against {B}. {R}'],
+        tie:['Stalemate: {A} ties with {B}. Try something creative!','Tie — both are similar: {A} vs {B}.','Even match: {A} == {B}.']
+      };
+
+      function save(){ localStorage.setItem('aiEndlessState_v1', JSON.stringify(state)); }
+      function load(){ try{ const raw=localStorage.getItem('aiEndlessState_v1'); if(raw) state=Object.assign(state, JSON.parse(raw)); }catch(e){}
+      }
+
+      function normalize(s){ if(!s) return ''; return String(s).trim(); }
+
+      function detectCats(s){
+        const found = {};
+        const norm = String(s).toLowerCase();
+        Object.keys(CATS).forEach(k=>{
+          CATS[k].keywords.forEach(kw=>{
+            if(norm.includes(kw)) found[k] = (found[k]||0) + 1;
+          });
+        });
+        return found;
+      }
+
+      function bestCatScore(found){ let best=null, score=0; Object.keys(found).forEach(k=>{ if(found[k]>score){score=found[k];best=k;} }); return {best,score}; }
+
+      function randomChoice(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+      function evaluate(prevRaw, currRaw){
+        const prev = normalize(prevRaw||'');
+        const curr = normalize(currRaw||'');
+        if(!prev) return {result:'win',reason:'Starting move — you score the first point!',explain:'First move',confidence:0.6};
+        if(curr.toLowerCase() === prev.toLowerCase()) return {result:'tie',reason:'Exact match',explain:'Same move',confidence:0.9};
+
+        const prevCats = detectCats(prev);
+        const currCats = detectCats(curr);
+        const pBest = bestCatScore(prevCats);
+        const cBest = bestCatScore(currCats);
+
+        const RULES = {
+          scissors:['paper','magic'],
+          paper:['rock','water','magic'],
+          rock:['scissors','fire','electric'],
+          lizard:['paper','spock','magic'],
+          spock:['scissors','rock','electric'],
+          fire:['paper','monster'],
+          water:['fire','electric'],
+          electric:['water','spock'],
+          magic:['electric','monster'],
+          monster:['lizard','paper']
+        };
+
+        if(cBest.best && pBest.best){
+          const cw = cBest.best, pw = pBest.best;
+          const cwScore=cBest.score, pwScore=pBest.score;
+          if(RULES[cw] && RULES[cw].includes(pw)){ 
+            const reason = `${CATS[cw].name} beats ${CATS[pw].name}`;
+            const confidence = Math.min(0.7 + (cwScore - pwScore)*0.15 + 0.2, 0.98);
+            return {result:'win',reason,explain:reason,confidence};
+          }
+          if(RULES[pw] && RULES[pw].includes(cw)){ 
+            const reason = `${CATS[pw].name} beats ${CATS[cw].name}`;
+            const confidence = Math.min(0.6 + (pwScore - cwScore)*0.12, 0.95);
+            return {result:'lose',reason,explain:reason,confidence};
+          }
+          if(cwScore>pwScore+1){
+            const reason = `More related to ${CATS[cw].name} than previous`;
+            const confidence = 0.65 + (cwScore-pwScore)*0.08;
+            return {result:'win',reason,explain:reason,confidence};
+          }
+          if(pwScore>cwScore+1){
+            const reason = `Previous was more strongly ${CATS[pw].name}`;
+            const confidence = 0.62 + (pwScore-cwScore)*0.08;
+            return {result:'lose',reason,explain:reason,confidence};
+          }
+        }
+
+        const novelty = curr.split(' ').filter(w=>!prev.toLowerCase().includes(w.toLowerCase())).length;
+        if(novelty>=2){
+          return {result:'win',reason:'Introduced novel elements',explain:`Your move adds new concepts (${novelty})`,confidence:0.6 + Math.min(0.2, novelty*0.05)};
+        }
+
+        const winsWords = ['beats','crushes','slays','destroys','crush','vaporizes','defeats','trumps'];
+        const losesWords = ['is beaten by','loses to','loses','is crushed by','is defeated by'];
+        for(const w of winsWords) if(curr.toLowerCase().includes(w)) return {result:'win',reason:`Your move claims to beat previous (${w})`,explain:`You stated '${w}'`,confidence:0.78};
+        for(const w of losesWords) if(curr.toLowerCase().includes(w)) return {result:'lose',reason:`You admitted defeat (${w})`,explain:`You wrote '${w}'`,confidence:0.9};
+
+        const lenBias = Math.max(0, prev.length - curr.length);
+        const toss = Math.random() + lenBias*0.02;
+        if(toss>0.6) return {result:'win',reason:'Judge liked the creativity',explain:'Creative edge',confidence:0.45 + Math.random()*0.4};
+        if(toss<0.35) return {result:'lose',reason:'Judge favored previous',explain:'Previous had surface advantage',confidence:0.45 + Math.random()*0.45};
+        return {result:'tie',reason:'Close call',explain:'Too similar to decide',confidence:0.4 + Math.random()*0.4};
+      }
+
+      function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+      function renderEntry(prev, curr, outcome){
+        const div = document.createElement('div');
+        div.className = 'entry ' + (outcome.result==='win'?'win': outcome.result==='lose'?'lose':'tie');
+        const templateArr = templates[outcome.result] || templates.tie;
+        const line = randomChoice(templateArr).replace('{A}',escapeHtml(curr)).replace('{B}',escapeHtml(prev||'(start)')).replace('{R}',escapeHtml(outcome.reason));
+        const conf = Math.round((outcome.confidence||0)*100);
+        div.innerHTML = `<div><strong>${escapeHtml(curr)}</strong> <span style="color:var(--muted)">vs</span> <em>${escapeHtml(prev||'(start)')}</em></div>
+                         <div style="margin-top:6px">${escapeHtml(line)}</div>
+                         <div class="meta">Judge confidence: ${conf}% — ${escapeHtml(outcome.explain||'')}</div>`;
+        logEl.prepend(div);
+      }
+
+      // audio helpers using WebAudio (no external files)
+      const audioCtx = (window.AudioContext || window.webkitAudioContext) ? new (window.AudioContext || window.webkitAudioContext)() : null;
+      function beep(freq, duration=0.08, type='sine', gain=0.08){
+        if(!audioCtx) return;
+        try{
+          const o = audioCtx.createOscillator();
+          const g = audioCtx.createGain();
+          o.type = type; o.frequency.value = freq; g.gain.value = gain;
+          o.connect(g); g.connect(audioCtx.destination);
+          o.start(); o.stop(audioCtx.currentTime + duration);
+        }catch(e){}
+      }
+      function playClick(){ if(!soundsToggle.checked) return; beep(800,0.03,'square',0.06); }
+      function playWin(){ if(!soundsToggle.checked) return; beep(800,0.06,'sawtooth',0.08); setTimeout(()=>beep(1200,0.06,'sine',0.06),80); }
+      function playLose(){ if(!soundsToggle.checked) return; beep(300,0.08,'sine',0.08); setTimeout(()=>beep(200,0.06,'sine',0.06),90); }
+
+      function updateScoreboard(){ winsEl.textContent = state.wins; lossesEl.textContent = state.losses; tiesEl.textContent = state.ties; }
+
+      function pushMove(currRaw){
+        const curr = normalize(currRaw);
+        if(!curr) return;
+        const prev = state.prev;
+        const outcome = evaluate(prev, curr);
+        // update scores
+        if(outcome.result==='win'){ state.wins++; playWin(); }
+        else if(outcome.result==='lose'){ state.losses++; playLose(); }
+        else { state.ties++; beep(600,0.04,'triangle',0.04); }
+        const entry = {timestamp:Date.now(), prev:prev, move:curr, outcome};
+        state.history.push(entry);
+        state.prev = curr;
+        save();
+        updateScoreboard();
+        prevEl.textContent = curr;
+        renderEntry(prev, curr, outcome);
+        input.value = '';
+        playBtn.disabled = false;
+      }
+
+      playBtn.addEventListener('click', ()=>{ playClick(); const v = input.value.trim(); if(!v){ input.focus(); return; } pushMove(v); });
+      input.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); playBtn.click(); } });
+
+      emojiRow.addEventListener('click', (e)=>{ const b = e.target.closest('button'); if(!b) return; const val = b.textContent.trim(); input.value = val; input.focus(); });
+
+      passBtn.addEventListener('click', ()=>{
+        // Suggest a creative reply based on previous
+        const prev = state.prev || '';
+        let suggestion = '';
+        if(!prev){ const choices = ['✊','✋','✌️','🦎','🖖','🔥','💧','⚡','🪨']; suggestion = randomChoice(choices); }
+        else{
+          // detect prev category and pick a counter from RULES
+          const found = detectCats(prev);
+          const pBest = bestCatScore(found);
+          const RULES_INV = {
+            scissors:['rock','spock','fire','monster'],
+            paper:['scissors','lizard','fire'],
+            rock:['paper','spock','water'],
+            lizard:['rock','scissors','monster'],
+            spock:['lizard','paper','magic'],
+            fire:['water','rock'],
+            water:['electric','paper'],
+            electric:['rock','magic','water'],
+            magic:['rock','scissors'],
+            monster:['magic','fire']
+          };
+          let targetCats = [];
+          if(pBest.best && RULES_INV[pBest.best]) targetCats = RULES_INV[pBest.best];
+          if(targetCats.length===0) targetCats = Object.keys(CATS);
+          const pickCat = randomChoice(targetCats);
+          // pick representative words/emojis
+          const rep = {rock:'🪨',paper:'✋',scissors:'✌️',lizard:'🦎',spock:'🖖',fire:'🔥',water:'💧',electric:'⚡',magic:'✨',monster:'🐉'};
+          suggestion = rep[pickCat] || pickCat;
+          // sometimes add flavor
+          if(Math.random()>0.6) suggestion += ' ' + randomChoice(['crusher','vaporizer','friend','strike','blaster']);
+        }
+        input.value = suggestion; input.focus(); }
+      );
+
+      resetBtn.addEventListener('click', ()=>{
+        if(!confirm('Reset game and clear local history?')) return;
+        state = {prev:null,wins:0,losses:0,ties:0,history:[]}; save(); logEl.innerHTML=''; prevEl.textContent='(start)'; updateScoreboard();
+      });
+
+      exportBtn.addEventListener('click', ()=>{
+        const data = JSON.stringify(state, null, 2);
+        const blob = new Blob([data], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'ai-endless-rps-log.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      });
+
+      // load previous state
+      load();
+      updateScoreboard();
+      if(state.prev) prevEl.textContent = state.prev;
+      // render previous history
+      if(state.history && state.history.length>0){ state.history.slice(-150).forEach(h=> renderEntry(h.prev,h.move,h.outcome)); }
+
+      // resume audio context on first interaction (for some browsers)
+      document.addEventListener('click', ()=>{ if(audioCtx && audioCtx.state==='suspended') audioCtx.resume(); }, {once:true});
+
+    })();
+  </script>
+</body>
+</html>
